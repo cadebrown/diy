@@ -1,16 +1,16 @@
-/* kre.c - a simple regex engine and search tool
+/* cre.c - a simple regex engine and search tool
  *
  * --- SETUP ---
  * 
  * I've written this file to be able to:
  * 
  *   * be included as a single file in an existing C/C++ project
- *   * be compiled as a 'kre' executable 
+ *   * be compiled as a 'cre' executable 
  *
- * To compile as a 'kre' executable (that works basically like grep), run:
+ * To compile as a 'cre' executable (that works basically like grep), run:
  * 
- * $ cc -DEXE -o kre kre.c
- * $ ./kre --help
+ * $ cc -DEXE -o cre cre.c
+ * $ ./cre --help
  * ...
  * 
  * Otherwise, it should work like any other C/C++ files in your project,
@@ -22,20 +22,20 @@
  * --- BASIC USAGE ---
  * 
  * First, create a regex pattern:
- *   kre_pat pat;
- *   kre_pat_init(&pat, "[a-zA-Z_][a-zA-Z_0-9]*");
+ *   cre_pat pat;
+ *   cre_pat_init(&pat, "[a-zA-Z_][a-zA-Z_0-9]*");
  * Then, create an simulator:
- *   kre_sim sim;
- *   kre_sim_init(&sim, &pat);
+ *   cre_sim sim;
+ *   cre_sim_init(&sim, &pat);
  * Then, you can feed a string through the iterator:
  *   for (i = 0; i < len; ++i) {
  *     // attempt to start matching here
- *     kre_sim_feedz(&sim, KRE_START);
- *     if (kre_sim_feedc(&sim, src[i])) {
+ *     cre_sim_feedz(&sim, cre_START);
+ *     if (cre_sim_feedc(&sim, src[i])) {
  *       // match found!
  *     }
  *   }
- * You can give it any source characters, and 'kre_sim_feedc'
+ * You can give it any source characters, and 'cre_sim_feedc'
  *   will return true if the source string matches at a given position
  * This usage will only tell whether a match is found, not what
  *   the matching substring is. As a result, this method can be used
@@ -46,14 +46,14 @@
  * 
  * For many use cases, the actual substring that matches (along with
  *     capture groups) is desired. To do this, you can use the iterator 
- *     structure (kre_iter):
- *   kre_iter iter;
- *   kre_iter_init(&iter, &pat);
+ *     structure (cre_iter):
+ *   cre_iter iter;
+ *   cre_iter_init(&iter, &pat);
  *   for (i = 0; i < len; ++i) {
- *     kre_iter_feedc(&iter, src[i]);
+ *     cre_iter_feedc(&iter, src[i]);
  *     for (j = 0; j < iter->matches_len; ++j) {
- *       struct kre_iter_match* m = iter->matches[j];
- *       char* ms = kre_iter_match_gets(&iter, m);
+ *       struct cre_iter_match* m = iter->matches[j];
+ *       char* ms = cre_iter_match_gets(&iter, m);
  *       printf("got match: %s\n", ms);
  *       free(ms);
  *     }
@@ -78,30 +78,30 @@
 /// TYPEDEFS ///
 
 // describes what kinds of nodes there are
-enum kre_kind {
+enum cre_kind {
     // matches epsilon (i.e. empty string/anything)
-    KRE_EPS,
+    cre_EPS,
 
     // matches any character that is part of a set
     // this kind is also used for single characters, which are trivially a set of 1 characters
     // NOTE: Unicode is not supported... this is left as an exercise for the reader
-    KRE_SET,
+    cre_SET,
 
 };
 
 // regular expression NFA node structure
-struct kre_node {
+struct cre_node {
 
     // what kind of node is this?
-    // see 'KRE_*' above
-    enum kre_kind kind;
+    // see 'cre_*' above
+    enum cre_kind kind;
 
     // outward edges of the NFA node (as indices into an array of nodes), OR:
     //   -1: empty/no edge
     //   -2: open edge that is unlinked, which means a match state
     int u, v;
 
-    // if kind==KRE_SET, this is the set of characters that this node matches
+    // if kind==cre_SET, this is the set of characters that this node matches
     // NOTE: as mentioned, Unicode is note supported, and so only 256 characters are supported, corresponding to ASCII (first 128), and byte values
     bool *set;
 
@@ -114,7 +114,7 @@ typedef struct {
     int nfa_len;
 
     // the NFA nodes
-    struct kre_node* nfa;
+    struct cre_node* nfa;
 
     // which node in 'nfa' to start matching with
     int nfa_start;
@@ -123,16 +123,16 @@ typedef struct {
     // NOTE: this is just for debugging purposes, and is not used during the actual search
     char* src;
 
-} kre_pat;
+} cre_pat;
 
 
 // regular expression state simulator, used to simulate the NFA state machine
 // NOTE: this only tells whether something has matched, not what the
-//         matching substring/groups is/are. for that, use 'kre_iter'
+//         matching substring/groups is/are. for that, use 'cre_iter'
 typedef struct {
 
     // the pattern being searched for (should not change!)
-    kre_pat* pat;
+    cre_pat* pat;
 
     // bitset representing the current state(s) of the NFA, i.e. 'in[s]' tells whether
     //   the NFA is currently in state 's'
@@ -142,14 +142,14 @@ typedef struct {
     // another array of inputs, used as ping-pong buffers to efficiently feed the iterator
     bool* lastin;
 
-} kre_sim;
+} cre_sim;
 
 
 // internal structure that represents a single
-struct kre_iter_path {
+struct cre_iter_path {
 
     // simulator used for this path
-    kre_sim sim;
+    cre_sim sim;
 
     // match start (inclusive) and end (exclusive) as positions
     int Ms, Me;
@@ -166,7 +166,7 @@ typedef struct {
     int paths_len, paths_cap;
 
     // array of paths, which are valid paths that have been initialized
-    struct kre_iter_path* paths;
+    struct cre_iter_path* paths;
 
     // length and capacity of the input buffer
     int buf_len, buf_cap;
@@ -174,7 +174,7 @@ typedef struct {
     // input buffer
     char* buf;
 
-} kre_iter;
+} cre_iter;
 
 
 /// API ///
@@ -182,51 +182,51 @@ typedef struct {
 // make a new regular expression pattern from 'src', returns NULL (if successful),
 //   or a string describing the error. you should pass the error string to 'free()'
 //   when you are done with it
-// NOTE: call 'kre_pat_free(pat)' when you're done with it
+// NOTE: call 'cre_pat_free(pat)' when you're done with it
 char*
-kre_pat_init(kre_pat* pat, const char* src);
+cre_pat_init(cre_pat* pat, const char* src);
 
 // free a regular expression pattern's resources/memory
 void
-kre_pat_free(kre_pat* pat);
+cre_pat_free(cre_pat* pat);
 
 
 // initialize a simulator with a given pattern
-// NOTE: call 'kre_sim_free(sim)' when you're done with it
+// NOTE: call 'cre_sim_free(sim)' when you're done with it
 void
-kre_sim_init(kre_sim* sim, kre_pat* pat);
+cre_sim_init(cre_sim* sim, cre_pat* pat);
 
 // free an simulator's resources/memory
 void
-kre_sim_free(kre_sim* sim);
+cre_sim_free(cre_sim* sim);
 
 // reset the simulator's state, as if it were just created
 void
-kre_sim_reset(kre_sim* sim);
+cre_sim_reset(cre_sim* sim);
 
 // feed a single character to the simulator, returning whether it is in
 //   a matching state
 bool
-kre_sim_feedc(kre_sim* sim, char c);
+cre_sim_feedc(cre_sim* sim, char c);
 
 
 // initialize an iterator with a given pattern
-// NOTE: call 'kre_iter_free(iter)' when you're done with it
+// NOTE: call 'cre_iter_free(iter)' when you're done with it
 void
-kre_iter_init(kre_iter* iter, kre_pat* pat);
+cre_iter_init(cre_iter* iter, cre_pat* pat);
 
 // initialize an iterator's resources/memory
 void
-kre_iter_free(kre_iter* iter);
+cre_iter_free(cre_iter* iter);
 
 // reset the iterator's state, as if it were just created
 void
-kre_iter_reset(kre_iter* iter);
+cre_iter_reset(cre_iter* iter);
 
 // feed a single character to the iterator, returning whether there were any
 //   finalized matches produced
 bool
-kre_iter_feedc(kre_iter* iter, char c);
+cre_iter_feedc(cre_iter* iter, char c);
 
 //// HEADER END ////
 
@@ -235,13 +235,13 @@ kre_iter_feedc(kre_iter* iter, char c);
 
 /// IMPL ///
 
-//// IMPL: kre_pat ////
+//// IMPL: cre_pat ////
 
 static int
-kre_parse_(kre_pat* pat, const char* src);
+cre_parse_(cre_pat* pat, const char* src);
 
 char*
-kre_pat_init(kre_pat* pat, const char* src) {
+cre_pat_init(cre_pat* pat, const char* src) {
     // first, copy over the source for debugging purposes
     int sl = strlen(src);
     pat->src = malloc(sl + 1);
@@ -253,39 +253,39 @@ kre_pat_init(kre_pat* pat, const char* src) {
     pat->nfa = NULL;
 
     // now, actually parse and return the start state
-    pat->nfa_start = kre_parse_(pat, src);
+    pat->nfa_start = cre_parse_(pat, src);
 
     // no error
     return NULL;
 }
 
 void
-kre_pat_free(kre_pat* pat) {
+cre_pat_free(cre_pat* pat) {
     free(pat->src);
     free(pat->nfa);
 }
 
 
-//// IMPL: kre_sim ////
+//// IMPL: cre_sim ////
 
 void
-kre_sim_init(kre_sim* sim, kre_pat* pat) {
+cre_sim_init(cre_sim* sim, cre_pat* pat) {
     sim->pat = pat;
     sim->in = malloc(sizeof(*sim->in) * pat->nfa_len);
     sim->lastin = malloc(sizeof(*sim->lastin) * pat->nfa_len);
 
     // start off by resetting it
-    kre_sim_reset(iter);
+    cre_sim_reset(iter);
 }
 
 void
-kre_sim_free(kre_sim* sim) {
+cre_sim_free(cre_sim* sim) {
     free(sim->in);
     free(sim->lastin);
 }
 
 void
-kre_sim_reset(kre_sim* sim) {
+cre_sim_reset(cre_sim* sim) {
     // initialize everything to false
     int i;
     for (i = 0; i < pat->nfa_len; i++) {
@@ -297,7 +297,7 @@ kre_sim_reset(kre_sim* sim) {
 
 // add a state
 static bool
-kre_sim_add_(kre_sim* sim, int i) {
+cre_sim_add_(cre_sim* sim, int i) {
     if (i == -1) {
         // empty/nothing further
         return false;
@@ -313,13 +313,13 @@ kre_sim_add_(kre_sim* sim, int i) {
 
     bool res = false;
 
-    struct kre_node* n = &sim->pat->nfa[i];
-    if (sim->pat->nfa[i].kind == KRE_EPS) {
+    struct cre_node* n = &sim->pat->nfa[i];
+    if (sim->pat->nfa[i].kind == cre_EPS) {
         // on epsilon nodes, simulate an instant transition to those states
         // NOTE: an simulator should never be "in" a state that is an epsilon node, since
         //         by definition it should instantly transition out as well
-        if (kre_sim_add_(sim, n->u)) res = true;
-        if (kre_sim_add_(sim, n->v)) res = true;
+        if (cre_sim_add_(sim, n->u)) res = true;
+        if (cre_sim_add_(sim, n->v)) res = true;
     } else {
         // not epsilon, so transition directly and record it
         sim->in[i] = true;
@@ -329,7 +329,7 @@ kre_sim_add_(kre_sim* sim, int i) {
 }
 
 bool
-kre_sim_feedc(kre_sim* sim, char c) {
+cre_sim_feedc(cre_sim* sim, char c) {
     // swap buffers, since we're about to overwrite them
     bool* tmp = sim->in;
     sim->in = sim->lastin;
@@ -347,18 +347,18 @@ kre_sim_feedc(kre_sim* sim, char c) {
     //   and add those to the current states we're in
     for (i = 0; i < sim->pat->nfa_len; i++) {
         if (sim->lastin[i]) {
-            struct kre_node* n = &sim->pat->nfa[i];
+            struct cre_node* n = &sim->pat->nfa[i];
 
             // whether the current character ('c') matches the current node
             bool valid = false;
-            if (n->kind == KRE_SET) {
+            if (n->kind == cre_SET) {
                 valid = n->set[c];
             }
 
             if (valid) {
                 // since this state is valid, try to transition to other states as well (recursively)
-                if (kre_sim_add_(sim, n->u)) res = true;
-                if (kre_sim_add_(sim, n->v)) res = true;
+                if (cre_sim_add_(sim, n->u)) res = true;
+                if (cre_sim_add_(sim, n->v)) res = true;
             }
         }
     }
@@ -366,10 +366,10 @@ kre_sim_feedc(kre_sim* sim, char c) {
     return res;
 }
 
-//// IMPL: kre_iter ////
+//// IMPL: cre_iter ////
 
 void
-kre_iter_init(kre_iter* iter, kre_pat* pat) {
+cre_iter_init(cre_iter* iter, cre_pat* pat) {
     iter->pat = pat;
 
     iter->paths_cap = iter->paths_len = 0;
@@ -379,16 +379,16 @@ kre_iter_init(kre_iter* iter, kre_pat* pat) {
     iter->buf_len = 0;
 
     // start off by resetting it
-    kre_iter_reset(iter);
+    cre_iter_reset(iter);
 }
 
 void
-kre_iter_free(kre_iter* iter) {
+cre_iter_free(cre_iter* iter) {
     int i;
     for (i = 0; i < iter->paths_cap; i++) {
-        struct kre_path* p = &iter->paths[i];
+        struct cre_path* p = &iter->paths[i];
         // free each path's resources
-        kre_sim_free(&p->sim);
+        cre_sim_free(&p->sim);
         free(p->Gs);
         free(p->Ge);
     }
@@ -397,7 +397,7 @@ kre_iter_free(kre_iter* iter) {
 }
 
 void
-kre_iter_reset(kre_iter* iter) {
+cre_iter_reset(cre_iter* iter) {
     // reset lengths to 0, but don't free
     iter->paths_len = 0;
     iter->buf_len = 0;
@@ -406,14 +406,14 @@ kre_iter_reset(kre_iter* iter) {
 // feed a single character to the iterator, returning whether there were any
 //   finalized matches produced
 bool
-kre_iter_feedc(kre_iter* iter, char c) {
+cre_iter_feedc(cre_iter* iter, char c) {
     int i, j;
 
     // whether we have already added a new path
     bool has_newpath = false;
     for (i = 0; i < iter->paths_len; ++i) {
-        struct kre_iter_path* p = &iter->paths[i];
-        kre_sim* s = &p->sim;
+        struct cre_iter_path* p = &iter->paths[i];
+        cre_sim* s = &p->sim;
         if (!has_newpath && p->Ms < 0) {
             // we don't have a new path yet, so add one
             p->Ms = iter->buf_len;
@@ -427,8 +427,8 @@ kre_iter_feedc(kre_iter* iter, char c) {
                 iter->paths_cap = iter->paths_len * 2 + 4;
                 iter->paths = realloc(iter->paths, sizeof(*iter->paths) * iter->paths_cap);
                 for (i = iter->paths_len; i < iter->paths_cap; ++i) {
-                    struct kre_iter_path* p = &iter->paths[i];
-                    kre_sim_init(&p->sim, iter->pat);
+                    struct cre_iter_path* p = &iter->paths[i];
+                    cre_sim_init(&p->sim, iter->pat);
                     p->Gs = malloc(sizeof(*p->Gs) * iter->pat->nfa_len);
                     p->Ge = malloc(sizeof(*p->Gs) * iter->pat->nfa_len);
                 }
@@ -441,7 +441,7 @@ kre_iter_feedc(kre_iter* iter, char c) {
         } 
         if (p->Ms >= 0) {
             // active path, so feed it
-            bool ismatch = kre_sim_feedc(s, c);
+            bool ismatch = cre_sim_feedc(s, c);
             if (ismatch) {
                 // have a match, so update the end to the longest match
                 p->Me = iter->buf_len;
@@ -484,12 +484,12 @@ main(int argc, char** argv) {
     }
 
     // initialize search pattern
-    kre_pat pat;
-    kre_pat_init(&pat, argv[1]);
+    cre_pat pat;
+    cre_pat_init(&pat, argv[1]);
 
     // initialize simulator as well
-    kre_sim sim;
-    kre_sim_init(&sim, &pat);
+    cre_sim sim;
+    cre_sim_init(&sim, &pat);
 
     // buffering size
     int bufsz = 4096;
@@ -512,7 +512,7 @@ main(int argc, char** argv) {
             if (sz == 0) break;
 
             for (j = 0; j < sz; ++j) {
-                if (kre_sim_feedc(&it, buf[j])) {
+                if (cre_sim_feedc(&it, buf[j])) {
                     // found match
                     printf("MATCH\n");
                 }
@@ -524,8 +524,8 @@ main(int argc, char** argv) {
 
     // free resources
     free(buf);
-    kre_sim_free(&it);
-    kre_pat_free(&pat);
+    cre_sim_free(&it);
+    cre_pat_free(&pat);
 }
 
 #endif // EXE
